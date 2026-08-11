@@ -3,17 +3,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from openai import OpenAI
+from groq import Groq
 
 from backend.config.settings import settings
 
 
 class ModelService:
     def __init__(self) -> None:
-        self.model_name = "gpt-4o-mini"
-        if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is missing in the configuration")
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.model_name = "llama-3.1-8b-instant"
+        if not settings.groq_api_key:
+            raise ValueError("GROQ_API_KEY is missing in the configuration")
+        self.client = Groq(api_key=settings.groq_api_key)
 
     def predict(self, text: str) -> dict[str, Any]:
         cleaned = text.strip()
@@ -43,7 +43,7 @@ class ModelService:
 
         result_text = response.choices[0].message.content
         if not result_text:
-            raise ValueError("OpenAI returned an empty response")
+            raise ValueError("Groq returned an empty response")
             
         result = json.loads(result_text)
         prediction = result.get("prediction", "Fake")
@@ -66,7 +66,7 @@ class ModelService:
         return {
             "model_name": self.model_name,
             "version": settings.app_version,
-            "framework": "OpenAI API",
+            "framework": "Groq API",
             "dataset": "Real-time Fact Checking",
             "num_classes": 2,
             "training_accuracy": 0.99,

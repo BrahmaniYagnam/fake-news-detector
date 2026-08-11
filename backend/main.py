@@ -1,5 +1,7 @@
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.config.settings import settings
 from backend.routers.health import router as health_router
@@ -27,12 +29,16 @@ app.include_router(health_router)
 app.include_router(info_router)
 app.include_router(predict_router)
 
-
-@app.get("/", tags=["Root"])
-def root() -> dict[str, str]:
-    return {"message": f"{settings.app_name} is running."}
-
-
 @app.on_event("startup")
 def startup_event() -> None:
     logger.info("Starting Fake News Detector API")
+
+frontend_dir = Path("frontend/dist")
+if frontend_dir.exists() and frontend_dir.is_dir():
+    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+else:
+    logger.warning("Frontend dist directory not found. Static files will not be served.")
+
+    @app.get("/", tags=["Root"])
+    def root() -> dict[str, str]:
+        return {"message": f"{settings.app_name} is running. (Frontend not built)"}
