@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["*"]
     max_length: int = 256
     batch_size: int = 16
+    openai_api_key: str = ""
 
     class Config:
         env_file = ".env"

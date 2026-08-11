@@ -1,60 +1,73 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from openai import OpenAI
 
 from backend.config.settings import settings
 
 
 class ModelService:
     def __init__(self) -> None:
-        self.model_name = "Pulk17/Fake-News-Detection"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
-        self.model.eval()
-        # Ensure model handles explanations by requiring gradients if needed, 
-        # though evaluate mode usually turns off dropout. Explainability needs gradients.
-        self.labels = {0: "Fake", 1: "Real"}
+        self.model_name = "gpt-4o-mini"
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is missing in the configuration")
+        self.client = OpenAI(api_key=settings.openai_api_key)
 
     def predict(self, text: str) -> dict[str, Any]:
         cleaned = text.strip()
-        encoding = self.tokenizer(
-            cleaned,
-            truncation=True,
-            padding="max_length",
-            max_length=settings.max_length,
-            return_tensors="pt",
+        
+        system_prompt = (
+            "You are an expert fact-checker and fake news detector. "
+            "Analyze the provided news headline or article. "
+            "Determine if it is factually 'Real' (true current events) or 'Fake' (false, misinformation, or highly misleading). "
+            "Return ONLY a JSON object with the following schema:\n"
+            "{\n"
+            '  "prediction": "Real" or "Fake",\n'
+            '  "confidence": <float between 0.0 and 1.0>,\n'
+            '  "important_keywords": ["word1", "word2", "word3"]\n'
+            "}\n"
+            "important_keywords should be an array of up to 8 of the most critical words in the text that led to your conclusion."
         )
-        with torch.no_grad():
-            outputs = self.model(
-                input_ids=encoding["input_ids"],
-                attention_mask=encoding["attention_mask"],
-            )
-            logits = outputs.logits
+
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": cleaned}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1
+        )
+
+        result_text = response.choices[0].message.content
+        if not result_text:
+            raise ValueError("OpenAI returned an empty response")
             
-        probabilities = torch.softmax(logits, dim=1).squeeze().tolist()
-        label_id = int(torch.argmax(logits, dim=1).item())
+        result = json.loads(result_text)
+        prediction = result.get("prediction", "Fake")
+        confidence = float(result.get("confidence", 0.99))
+        
+        probabilities = {
+            "Real": confidence if prediction == "Real" else 1.0 - confidence,
+            "Fake": confidence if prediction == "Fake" else 1.0 - confidence
+        }
+
         return {
-            "prediction": self.labels[label_id],
-            "confidence": float(probabilities[label_id]),
-            "probabilities": {
-                self.labels[idx]: float(score)
-                for idx, score in enumerate(probabilities)
-            },
-            "tokens": self.tokenizer.convert_ids_to_tokens(encoding["input_ids"][0]),
-            "probabilities_raw": probabilities,
+            "prediction": prediction,
+            "confidence": confidence,
+            "probabilities": probabilities,
+            "important_keywords": result.get("important_keywords", []),
+            "probabilities_raw": [probabilities["Fake"], probabilities["Real"]],
         }
 
     def get_info(self) -> dict[str, Any]:
         return {
             "model_name": self.model_name,
             "version": settings.app_version,
-            "framework": "PyTorch/HuggingFace",
-            "dataset": "ISOT Fake News Dataset (Pre-trained)",
-            "num_classes": len(self.labels),
+            "framework": "OpenAI API",
+            "dataset": "Real-time Fact Checking",
+            "num_classes": 2,
             "training_accuracy": 0.99,
         }
